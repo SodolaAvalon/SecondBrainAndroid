@@ -15,18 +15,24 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 /**
@@ -98,12 +104,45 @@ fun GlassSurface(
     radius: Dp = 24.dp,
     emphasized: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(18.dp),
+    reduceMotion: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    onClickLabel: String? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val clickable = onClick != null
+    // A quiet chevron is the only affordance that tells the user a card opens further.
+    val chevronSpace = if (clickable) 14.dp else 0.dp
+    val horizontal = contentPadding.calculateLeftPadding(LayoutDirection.Ltr)
+    val vertical = contentPadding.calculateTopPadding()
+
     Box(
-        modifier = modifier.softGlass(radius = radius, emphasized = emphasized).padding(contentPadding),
-        content = content
-    )
+        modifier = modifier
+            .softGlass(radius = radius, emphasized = emphasized)
+            .clip(RoundedCornerShape(radius))
+            .then(
+                if (onClick != null) {
+                    Modifier.springClickable(reduceMotion = reduceMotion, onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
+            .padding(
+                start = horizontal,
+                top = vertical,
+                end = horizontal + chevronSpace,
+                bottom = vertical
+            )
+    ) {
+        Box(modifier = Modifier.align(Alignment.CenterStart), content = content)
+        if (clickable) {
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = onClickLabel,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+            )
+        }
+    }
 }
 
 private fun Color.luminanceCompat(): Float {

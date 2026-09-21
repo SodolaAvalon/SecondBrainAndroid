@@ -1,15 +1,28 @@
 package com.lifeos.secondbrain.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -44,14 +57,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lifeos.secondbrain.domain.LifeNote
 import com.lifeos.secondbrain.ui.archive.ArchiveScreen
 import com.lifeos.secondbrain.ui.capture.CaptureSheet
 import com.lifeos.secondbrain.ui.home.HomeScreen
 import com.lifeos.secondbrain.ui.inspiration.InspirationScreen
+import com.lifeos.secondbrain.ui.note.NoteDetailScreen
 import com.lifeos.secondbrain.ui.settings.SettingsScreen
 import com.lifeos.secondbrain.ui.tasks.TasksScreen
 
 private enum class Tab { NOW, TASKS, INSPIRATION, ARCHIVE }
+
+/** Which surface is on top. Detail and settings are peers: both are entered from, and return to, the shell. */
+private enum class Surface { SHELL, SETTINGS, DETAIL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,28 +77,122 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
     var tab by remember { mutableStateOf(Tab.NOW) }
     var capture by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var openNote by remember { mutableStateOf<LifeNote?>(null) }
     val snack = remember { SnackbarHostState() }
     val message by vm.message.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val sync by vm.sync.collectAsStateWithLifecycle()
     val captureInProgress by vm.captureInProgress.collectAsStateWithLifecycle()
+    val reduceMotion = settings.reduceMotion
+
+    val surface = when {
+        openNote != null -> Surface.DETAIL
+        settingsOpen -> Surface.SETTINGS
+        else -> Surface.SHELL
+    }
 
     LaunchedEffect(message) {
         message?.let { snack.showSnackbar(it); vm.message.value = null }
     }
 
-    if (settingsOpen) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            snackbarHost = { SnackbarHost(snack) }
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                SettingsScreen(vm, onBack = { settingsOpen = false })
-            }
+    // Without this, system back inside 设置 leaves the app entirely instead of returning to the tabs.
+    // The capture sheet installs its own handler as a ModalBottomSheet, so it is not handled here.
+    // Enabled only for overlay surfaces, so back on the shell still exits the app as users expect.
+    BackHandler(enabled = surface != Surface.SHELL) {
+        when (surface) {
+            Surface.DETAIL -> openNote = null
+            Surface.SETTINGS -> settingsOpen = false
+            Surface.SHELL -> Unit
         }
-        return
     }
 
+    AnimatedContent(
+        targetState = surface,
+        transitionSpec = { overlayTransition(reduceMotion) },
+        label = "surface"
+    ) { current ->
+        when (current) {
+            Surface.DETAIL -> {
+                val note = openNote
+                if (note == null) {
+                    Box(Modifier.fillMaxSize())
+                } else {
+                    Scaffold(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        snackbarHost = { SnackbarHost(snack) }
+                    ) { padding ->
+                        Box(Modifier.fillMaxSize().padding(padding)) {
+                            NoteDetailScreen(vm, note, onBack = { openNote = null })
+                        }
+                    }
+                }
+            }
+
+            Surface.SETTINGS -> Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                snackbarHost = { SnackbarHost(snack) }
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    SettingsScreen(vm, onBack = { settingsOpen = false })
+                }
+            }
+
+            Surface.SHELL -> Shell(
+                vm = vm,
+                tab = tab,
+                onTabChange = { tab = it },
+                reduceMotion = reduceMotion,
+                snack = snack,
+                sync = sync,
+                captureInProgress = captureInProgress,
+                onAuthorizeDrive = onAuthorizeDrive,
+                onOpenSettings = { settingsOpen = true },
+                onOpenNote = { openNote = it },
+                onCapture = { capture = true }
+            )
+        }
+    }
+
+    if (capture) CaptureSheet(vm, onDismiss = { capture = false })
+}
+
+/**
+ * Overlay surfaces slide in from the trailing edge and settle; the shell eases back slightly and
+ * fades. The shell deliberately does not slide fully off — a short parallax reads as depth instead
+ * of as two unrelated screens swapping places.
+ */
+private fun overlayTransition(reduceMotion: Boolean): androidx.compose.animation.ContentTransform {
+    if (reduceMotion) return EnterTransition.None togetherWith ExitTransition.None
+    val enter = slideInHorizontally(
+        animationSpec = Motion.page(reduceMotion),
+        initialOffsetX = { width -> width }
+    ) + fadeIn(tween(Motion.PAGE_MS, easing = Motion.Settle))
+    val exit = slideOutHorizontally(
+        animationSpec = Motion.page(reduceMotion),
+        targetOffsetX = { width -> width }
+    ) + fadeOut(tween(Motion.PAGE_MS, easing = Motion.Settle))
+    val shellOut = slideOutHorizontally(
+        animationSpec = Motion.page(reduceMotion),
+        targetOffsetX = { width -> -width / 5 }
+    ) + fadeOut(tween(Motion.PAGE_MS / 2, easing = Motion.Settle))
+    return enter togetherWith shellOut
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun Shell(
+    vm: AppViewModel,
+    tab: Tab,
+    onTabChange: (Tab) -> Unit,
+    reduceMotion: Boolean,
+    snack: SnackbarHostState,
+    sync: com.lifeos.secondbrain.domain.SyncState,
+    captureInProgress: Boolean,
+    onAuthorizeDrive: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenNote: (LifeNote) -> Unit,
+    onCapture: () -> Unit
+) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -89,7 +201,7 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 actions = {
                     IconButton(
-                        onClick = { settingsOpen = true },
+                        onClick = onOpenSettings,
                         modifier = Modifier.padding(end = 10.dp).softGlass(radius = 18.dp, shadow = 4.dp)
                     ) {
                         Icon(Icons.Rounded.Settings, contentDescription = "设置")
@@ -103,7 +215,7 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                 modifier = Modifier
                     .size(64.dp)
                     .softGlass(radius = 24.dp, emphasized = true, shadow = 18.dp)
-                    .springClickable(reduceMotion = settings.reduceMotion) { capture = true }
+                    .springClickable(reduceMotion = reduceMotion, onClick = onCapture)
                     .padding(18.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -118,10 +230,10 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                 containerColor = Color.Transparent,
                 tonalElevation = 0.dp
             ) {
-                GlassNavigationItem(tab == Tab.NOW, settings.reduceMotion, Icons.Rounded.Home, "现在") { tab = Tab.NOW }
-                GlassNavigationItem(tab == Tab.TASKS, settings.reduceMotion, Icons.Rounded.CheckCircle, "任务") { tab = Tab.TASKS }
-                GlassNavigationItem(tab == Tab.INSPIRATION, settings.reduceMotion, Icons.Rounded.AutoAwesome, "灵感") { tab = Tab.INSPIRATION }
-                GlassNavigationItem(tab == Tab.ARCHIVE, settings.reduceMotion, Icons.Rounded.Search, "档案") { tab = Tab.ARCHIVE }
+                GlassNavigationItem(tab == Tab.NOW, reduceMotion, Icons.Rounded.Home, "现在") { onTabChange(Tab.NOW) }
+                GlassNavigationItem(tab == Tab.TASKS, reduceMotion, Icons.Rounded.CheckCircle, "任务") { onTabChange(Tab.TASKS) }
+                GlassNavigationItem(tab == Tab.INSPIRATION, reduceMotion, Icons.Rounded.AutoAwesome, "灵感") { onTabChange(Tab.INSPIRATION) }
+                GlassNavigationItem(tab == Tab.ARCHIVE, reduceMotion, Icons.Rounded.Search, "档案") { onTabChange(Tab.ARCHIVE) }
             }
         }
     ) { padding ->
@@ -131,17 +243,50 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                 onRefresh = { vm.refresh() },
                 modifier = Modifier.fillMaxSize()
             ) {
-                when (tab) {
-                    Tab.NOW -> HomeScreen(vm, onAuthorizeDrive)
-                    Tab.TASKS -> TasksScreen(vm)
-                    Tab.INSPIRATION -> InspirationScreen(vm)
-                    Tab.ARCHIVE -> ArchiveScreen(vm)
+                // Tab switches slide a short distance in the direction of travel, so moving between
+                // 现在/任务/灵感/档案 reads as lateral movement rather than as a hard cut.
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = {
+                        if (reduceMotion) {
+                            EnterTransition.None togetherWith ExitTransition.None
+                        } else {
+                            val forward = targetState.ordinal > initialState.ordinal
+                            val distance = 60
+                            (
+                                slideInHorizontally(tween(Motion.ENTER_MS, easing = Motion.Settle)) {
+                                    if (forward) it / distance else -it / distance
+                                } + fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle))
+                                ) togetherWith (
+                                slideOutHorizontally(tween(Motion.ENTER_MS, easing = Motion.Settle)) {
+                                    if (forward) -it / distance else it / distance
+                                } + fadeOut(tween(Motion.ENTER_MS / 2))
+                                )
+                        }
+                    },
+                    label = "tab"
+                ) { current ->
+                    when (current) {
+                        Tab.NOW -> HomeScreen(vm, onAuthorizeDrive, onOpenNote = onOpenNote)
+                        Tab.TASKS -> TasksScreen(vm, onOpenNote = onOpenNote)
+                        Tab.INSPIRATION -> InspirationScreen(vm, onOpenNote = onOpenNote)
+                        Tab.ARCHIVE -> ArchiveScreen(vm, onOpenNote = onOpenNote)
+                    }
                 }
             }
-            if (captureInProgress) {
+
+            AnimatedVisibility(
+                visible = captureInProgress,
+                enter = if (reduceMotion) EnterTransition.None
+                else slideInVertically(tween(Motion.ENTER_MS, easing = Motion.Settle)) { it / 2 } +
+                    fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle)) +
+                    scaleIn(initialScale = 0.94f, animationSpec = Motion.arrive(reduceMotion)),
+                exit = if (reduceMotion) ExitTransition.None
+                else fadeOut(tween(140)) + scaleOut(targetScale = 0.96f, animationSpec = tween(140)),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
                         .padding(bottom = 96.dp)
                         .softGlass(radius = 22.dp, emphasized = true, shadow = 10.dp)
                         .padding(horizontal = 18.dp, vertical = 12.dp)
@@ -157,7 +302,6 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
             }
         }
     }
-    if (capture) CaptureSheet(vm, onDismiss = { capture = false })
 }
 
 @Composable
