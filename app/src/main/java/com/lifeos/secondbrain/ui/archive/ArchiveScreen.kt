@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -26,6 +26,7 @@ import com.lifeos.secondbrain.domain.LifeNote
 import com.lifeos.secondbrain.domain.NoteType
 import com.lifeos.secondbrain.ui.AppViewModel
 import com.lifeos.secondbrain.ui.GlassSurface
+import com.lifeos.secondbrain.ui.sectionEnter
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -36,12 +37,13 @@ enum class ArchiveTypeFilter { ALL, TASK, IDEA, RAW, JOURNAL, PROJECT, REFERENCE
 enum class ArchiveDateFilter { ALL, LAST_30_DAYS, THIS_YEAR }
 
 @Composable
-fun ArchiveScreen(vm: AppViewModel) {
+fun ArchiveScreen(vm: AppViewModel, onOpenNote: (LifeNote) -> Unit) {
     var query by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf(ArchiveTypeFilter.ALL) }
     var dateFilter by remember { mutableStateOf(ArchiveDateFilter.ALL) }
     val results by vm.searchResults.collectAsStateWithLifecycle()
     val allNotes by vm.notes.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val base = if (query.isBlank()) allNotes else results
     val shown = base.filter { note -> matchesType(note, typeFilter) && matchesDate(note, dateFilter) }
 
@@ -96,8 +98,18 @@ fun ArchiveScreen(vm: AppViewModel) {
         } else if (shown.isEmpty()) {
             item { Text("没有找到，但你的档案还在那里。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        items(shown, key = { it.fileId }) { note ->
-            GlassSurface(Modifier.fillMaxWidth(), radius = 20.dp, contentPadding = PaddingValues(16.dp)) {
+        itemsIndexed(shown, key = { _, n -> n.fileId }) { index, note ->
+            GlassSurface(
+                Modifier
+                    .fillMaxWidth()
+                    .animateItem()
+                    .sectionEnter(note.fileId, index, settings.reduceMotion),
+                radius = 20.dp,
+                contentPadding = PaddingValues(16.dp),
+                reduceMotion = settings.reduceMotion,
+                onClick = { onOpenNote(note) },
+                onClickLabel = "打开 ${note.title}"
+            ) {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(note.title, style = MaterialTheme.typography.titleMedium)
                     val meta = listOfNotNull(note.type.raw, note.created ?: note.updated).joinToString(" · ")

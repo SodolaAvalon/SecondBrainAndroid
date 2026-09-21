@@ -1,5 +1,6 @@
 package com.lifeos.secondbrain.ui.tasks
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,7 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -24,15 +26,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lifeos.secondbrain.domain.LifeNote
 import com.lifeos.secondbrain.ui.AppViewModel
 import com.lifeos.secondbrain.ui.GlassSurface
+import com.lifeos.secondbrain.ui.sectionEnter
 import java.time.LocalDate
 
 enum class TaskSegment { TODAY, SOON, ALL, DONE }
 
 @Composable
-fun TasksScreen(vm: AppViewModel) {
+fun TasksScreen(vm: AppViewModel, onOpenNote: (LifeNote) -> Unit) {
     val active by vm.tasks.collectAsStateWithLifecycle()
     val all by vm.allTasks.collectAsStateWithLifecycle()
     var segment by remember { mutableStateOf(TaskSegment.TODAY) }
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val today = LocalDate.now()
     val shown = when (segment) {
         TaskSegment.TODAY -> active.filter { note -> note.due?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { !it.isAfter(today) } ?: false }
@@ -47,7 +51,10 @@ fun TasksScreen(vm: AppViewModel) {
     ) {
         item { Text("任务", style = MaterialTheme.typography.headlineLarge) }
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 TaskSegment.entries.forEach { item ->
                     FilterChip(
                         selected = segment == item,
@@ -58,13 +65,38 @@ fun TasksScreen(vm: AppViewModel) {
             }
         }
         if (shown.isEmpty()) item { Text(if (segment == TaskSegment.TODAY) "今天没有非做不可的事。" else "这里暂时很安静。") }
-        items(shown, key = { it.fileId }) { note -> TaskRow(note, segment == TaskSegment.DONE, vm) }
+        itemsIndexed(shown, key = { _, n -> n.fileId }) { index, note ->
+            TaskRow(
+                note = note,
+                done = segment == TaskSegment.DONE,
+                vm = vm,
+                reduceMotion = settings.reduceMotion,
+                modifier = Modifier
+                    .animateItem()
+                    .sectionEnter(note.fileId, index, settings.reduceMotion),
+                onOpen = { onOpenNote(note) }
+            )
+        }
     }
 }
 
 @Composable
-private fun TaskRow(note: LifeNote, done: Boolean, vm: AppViewModel) {
-    GlassSurface(Modifier.fillMaxWidth(), radius = 20.dp, contentPadding = PaddingValues(14.dp)) {
+private fun TaskRow(
+    note: LifeNote,
+    done: Boolean,
+    vm: AppViewModel,
+    reduceMotion: Boolean,
+    modifier: Modifier = Modifier,
+    onOpen: () -> Unit
+) {
+    GlassSurface(
+        modifier.fillMaxWidth(),
+        radius = 20.dp,
+        contentPadding = PaddingValues(14.dp),
+        reduceMotion = reduceMotion,
+        onClick = onOpen,
+        onClickLabel = "打开 ${note.title}"
+    ) {
         Row(Modifier.fillMaxWidth()) {
             Checkbox(done, onCheckedChange = { checked -> if (checked && !done) vm.complete(note) })
             Column(Modifier.padding(start = 8.dp)) {
