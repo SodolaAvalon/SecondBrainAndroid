@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -233,34 +234,47 @@ private fun Shell(
     onOpenNote: (LifeNote) -> Unit,
     onCapture: () -> Unit
 ) {
+    // Hoisted above the Scaffold so the toolbar spinner and the pull container share one state.
+    val pullState = rememberPullToRefreshState()
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                navigationIcon = {
-                    // Living inside the toolbar is what puts the status on the same horizontal line as
-                    // the settings action, and it is what keeps page content from shifting: the bar
-                    // reserves its height whether or not anything happens to be running.
-                    BusyChip(
-                        label = when {
-                            sync.isSyncing -> "正在同步……"
-                            captureInProgress -> "正在保存……"
-                            else -> null
-                        },
-                        reduceMotion = reduceMotion
-                    )
-                },
-                actions = {
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier.padding(end = 10.dp).softGlass(radius = 18.dp, shadow = 4.dp)
-                    ) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "设置")
+            // Wrapped in a Box so the spinner can be centred over the *whole* bar. Using the title
+            // slot instead put it at x≈482 rather than 540: TopAppBar lays the title out between the
+            // navigation icon and the actions, so its middle is not the bar's middle.
+            Box {
+                TopAppBar(
+                    title = { },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    navigationIcon = {
+                        // Same line as the settings action, and the bar keeps its height whether or not
+                        // anything is running, so page content never shifts.
+                        //
+                        // Only saving uses this chip. Syncing is represented by the centred spinner, so
+                        // showing "正在同步……" here as well would restore the duplicated status that
+                        // moving it to the centre was meant to remove.
+                        BusyChip(
+                            label = if (captureInProgress) "正在保存……" else null,
+                            reduceMotion = reduceMotion
+                        )
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.padding(end = 10.dp).softGlass(radius = 18.dp, shadow = 4.dp)
+                        ) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "设置")
+                        }
                     }
-                }
-            )
+                )
+                SyncSpinner(
+                    state = pullState,
+                    isRefreshing = sync.isSyncing,
+                    reduceMotion = reduceMotion,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snack) },
         floatingActionButton = {
@@ -291,20 +305,14 @@ private fun Shell(
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            val pullState = rememberPullToRefreshState()
             PullToRefreshBox(
                 isRefreshing = sync.isSyncing,
                 onRefresh = { vm.refresh() },
                 state = pullState,
-                // Draws nothing, on purpose. The content area must never show a circular spinner:
-                // `isRefreshing` is keyed off `sync.isSyncing`, which is also true for background
-                // syncs the user never started, so any indicator here duplicates the toolbar chip.
-                // Re-gating its visibility was not enough — a circle still appeared mid-pull — so the
-                // component is gone rather than hidden. The pull gesture itself still works; only the
-                // drawing is suppressed.
-                //
-                // Accepted trade-off: a pull that never reaches the threshold now gives no on-screen
-                // feedback. Sync status is the toolbar chip's job alone.
+                // No content-area indicator. The stock one would pin itself to the top-centre of the
+                // *content* and stay there for the whole of any sync — including background ones the
+                // user never started, which is exactly the stray circle that had to be removed twice.
+                // SyncSpinner in the toolbar covers both the drag and the ongoing sync instead.
                 indicator = {},
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -339,6 +347,44 @@ private fun Shell(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The single sync indicator, horizontally centred in the toolbar.
+ *
+ * It serves both halves of a refresh from one place: while the finger is down it tracks the drag as
+ * a determinate arc, and once the sync is actually running it spins. Having one component cover both
+ * is deliberate — separate indicators for "pulling" and "syncing" is what produced the duplicate
+ * circles that previously had to be removed.
+ *
+ * It is placed by the caller's `Modifier.align(Alignment.Center)` over the whole bar rather than in
+ * the TopAppBar title slot, because the title slot is laid out between the navigation icon and the
+ * actions — its middle is not the bar's middle (measured x≈482 instead of 540).
+ */
+@Composable
+private fun SyncSpinner(
+    state: PullToRefreshState,
+    isRefreshing: Boolean,
+    reduceMotion: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val drag = state.distanceFraction.coerceIn(0f, 1f)
+    Box(modifier, contentAlignment = Alignment.Center) {
+        AnimatedVisibility(
+            visible = isRefreshing || drag > 0f,
+            enter = if (reduceMotion) EnterTransition.None
+            else fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle)) +
+                scaleIn(initialScale = 0.9f, animationSpec = Motion.arrive(reduceMotion)),
+            exit = if (reduceMotion) ExitTransition.None
+            else fadeOut(tween(160)) + scaleOut(targetScale = 0.92f, animationSpec = tween(160))
+        ) {
+            CircularProgressIndicator(
+                progress = { if (isRefreshing) 1f else drag },
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.5.dp
+            )
         }
     }
 }
