@@ -219,31 +219,31 @@ internal fun overlayTransition(
 }
 
 /**
- * Pull-to-refresh answer, pinned to the top-start corner.
+ * Gesture feedback for the pull-to-refresh drag, and *only* that.
  *
- * The stock indicator rides down from the top-centre as the list is dragged, which is the motion
- * that reads as wrong here. This one only fades in place, following the drag distance so the
- * gesture still feels answered, and it disappears the moment the drag is released — ongoing status
- * is the corner chip's job, not this one's.
+ * It deliberately takes no `isRefreshing` input. PullToRefreshBox is driven by `sync.isSyncing`,
+ * which is also true for background syncs the user never initiated — so letting this component read
+ * the refreshing flag made it appear for every sync, duplicating the toolbar status chip and leaving
+ * a stray circle above the greeting. Ongoing sync state belongs to the chip alone; this one exists
+ * purely to answer a finger that is currently on the screen.
  *
- * Written against [PullToRefreshState.distanceFraction] rather than the defaults' Indicator, whose
- * parameters are not part of a stable contract across Compose versions.
+ * Gating on `drag > 0f` alone is enough: `distanceFraction` animates back to zero on release, so the
+ * indicator retires on its own without ever latching on to the sync that follows.
  */
 @Composable
 private fun BoxScope.CornerPullIndicator(
     state: PullToRefreshState,
-    isRefreshing: Boolean
+    reduceMotion: Boolean
 ) {
     val drag = state.distanceFraction.coerceIn(0f, 1f)
-    val visible = isRefreshing || drag > 0f
     AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(120)),
-        exit = fadeOut(tween(160)),
+        visible = drag > 0f,
+        enter = if (reduceMotion) EnterTransition.None else fadeIn(tween<Float>(120)),
+        exit = if (reduceMotion) ExitTransition.None else fadeOut(tween<Float>(160)),
         modifier = Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 12.dp)
     ) {
         CircularProgressIndicator(
-            progress = { if (isRefreshing) 1f else drag },
+            progress = { drag },
             modifier = Modifier
                 .size(18.dp)
                 .graphicsLayer { alpha = 0.45f },
@@ -330,10 +330,8 @@ private fun Shell(
                 isRefreshing = sync.isSyncing,
                 onRefresh = { vm.refresh() },
                 state = pullState,
-                // The stock indicator rides down from the top-centre as you pull, which is the
-                // motion that reads as wrong here. Scaled down and blended out it still answers the
-                // drag, while the corner chip below carries the actual status.
-                indicator = { CornerPullIndicator(state = pullState, isRefreshing = sync.isSyncing) },
+                // Gesture feedback only. Sync status lives in the toolbar chip; see CornerPullIndicator.
+                indicator = { CornerPullIndicator(state = pullState, reduceMotion = reduceMotion) },
                 modifier = Modifier.fillMaxSize()
             ) {
                 // Tab switches slide a short distance in the direction of travel, so moving between
