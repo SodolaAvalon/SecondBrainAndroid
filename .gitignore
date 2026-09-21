@@ -1,0 +1,30 @@
+# --- build tooling ---
+.gradle/
+.idea/
+local.properties
+build/
+**/build/
+build-smoke/
+.cxx/
+.kotlin/
+captures/
+
+# --- IDE / editor ---
+*.iml
+.DS_Store
+Thumbs.db
+
+# --- local build output ---
+*.apk
+*.aab
+*.hprof
+
+# --- secrets (never commit) ---
+keystore.properties
+*.jks
+*.keystore
+secrets.properties
+
+# --- vendored Xray kernel: 94.5 MB, deliberately NOT versioned ---
+# See THIRD_PARTY_REFERENCES.md -> "libXray" for provenance and how to restore it.
+app/libs/libXray.aar
