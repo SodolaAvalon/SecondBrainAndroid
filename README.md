@@ -75,12 +75,21 @@ Room 可以随时重建。任何真正需要永久保存的人生内容最终都
 
 ## 版本控制
 
-本目录是独立 Git 仓库（`main` 分支）。`app/libs/libXray.aar` 刻意不入库，见上文；其余源码完整。
+本目录是独立 Git 仓库（`main` 分支），远端为 https://github.com/SodolaAvalon/SecondBrainAndroid 。
+
+`app/libs/libXray.aar` 刻意不入库，见上文；其余源码完整。
 
 注意 `BuildOutput/`、`Handoff/`、`Akile_local_only.yaml`、`Tools/`、`Dev/`、`GithubOpenSource/` 均在本仓库之外，不属于版本控制范围。
 
+## 许可证
+
+**本仓库当前没有许可证（No License）**，即默认「保留所有权利」：可以阅读、学习、提 issue，但**没有明示授权去复制、修改或再分发代码**。如需复用请先联系仓库所有者。
+
+另需注意：本应用打包了 MIT 许可的 libXray 内核，分发二进制时须保留其版权与许可声明。完整第三方清单见 `THIRD_PARTY_REFERENCES.md`。
+
 ## 文档
 
+- `AGENTS.md`：**接手的 AI / 开发者先读这份**——不可违背的原则、代码结构、已知问题、安全红线。
 - `ARCHITECTURE.md`：数据、同步、离线、冲突和安全架构。
 - `GOOGLE_SETUP.md`：Google Cloud / OAuth / Web Client ID / SHA-1 配置。
 - `BUILD_OFFLINE.md`：历史记录——某个无外网沙盒要完成真实构建还缺什么（该阻塞已解除，保留作参考）。
