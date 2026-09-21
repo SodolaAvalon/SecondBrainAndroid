@@ -41,7 +41,10 @@ object NoteMapper {
             processed = document.scalar("processed")?.toBooleanStrictOrNull(),
             tags = document.list("tags"),
             modifiedTime = modifiedTime,
-            md5Checksum = md5Checksum
+            md5Checksum = md5Checksum,
+            start = document.scalar("start")?.takeIf { it.isNotBlank() },
+            repeat = document.scalar("repeat")?.takeIf { it.isNotBlank() },
+            lastCompleted = document.scalar("last_completed")?.takeIf { it.isNotBlank() }
         )
     }
 }

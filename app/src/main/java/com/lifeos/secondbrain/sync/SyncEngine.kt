@@ -8,7 +8,11 @@ import com.lifeos.secondbrain.database.PendingOperationDao
 import com.lifeos.secondbrain.database.PendingOperationEntity
 import com.lifeos.secondbrain.database.SyncMetaDao
 import com.lifeos.secondbrain.database.SyncMetaEntity
+import com.lifeos.secondbrain.database.toDomain
 import com.lifeos.secondbrain.database.toEntity
+import com.lifeos.secondbrain.domain.LifeNote
+import com.lifeos.secondbrain.domain.NoteType
+import com.lifeos.secondbrain.domain.planTaskCompletion
 import com.lifeos.secondbrain.drive.DriveApi
 import com.lifeos.secondbrain.drive.DriveFile
 import com.lifeos.secondbrain.settings.AppSettings
@@ -17,7 +21,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -35,7 +42,12 @@ class SyncEngine(
     private companion object {
         const val FILTER_VERSION_KEY = "filterVersion"
         const val FILTER_VERSION = "3"
+
+        /** Frontmatter keys a task completion is allowed to touch. */
+        val PATCHABLE_KEYS = setOf("status", "updated", "last_completed")
     }
+
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private val _state = MutableStateFlow(com.lifeos.secondbrain.domain.SyncState())
     val state: StateFlow<com.lifeos.secondbrain.domain.SyncState> = _state
@@ -142,13 +154,36 @@ class SyncEngine(
         }
     }
 
-    /** Returns true when the write is queued for later instead of already present in Drive. */
+    /**
+     * Marks a task complete, locally first and then in Drive.
+     *
+     * Returns true when the Drive write could not happen now and was queued instead.
+     *
+     * The local index is patched with the same frontmatter changes that go to Drive, which matters
+     * for a second reason beyond optimistic UI: `fullScanLocked` re-derives every row from Drive, so
+     * a local-only flag would be erased by the next full scan. Keeping the note recognisable as
+     * completed *from the Markdown alone* is what makes the state survive a rebuild.
+     */
     suspend fun completeTask(fileId: String): Boolean {
-        val updated = Instant.now().toString()
-        noteDao.get(fileId)?.let { noteDao.upsertIndexed(it.copy(status = "done", updated = updated)) }
+        val note = noteDao.get(fileId)
+        val today = LocalDate.now()
+        val timestamp = Instant.now().toString()
+        // When the note is not in the local index we have no frontmatter to branch on, so the plan
+        // falls back to ordinary one-off completion. Reachable only if Drive reported a file that was
+        // never indexed, which the sync path does not normally produce.
+        val plan = planTaskCompletion(note?.toDomain() ?: unindexedTask(fileId), today, timestamp)
+        note?.let {
+            noteDao.upsertIndexed(
+                it.copy(
+                    status = plan.changes["status"] ?: it.status,
+                    updated = timestamp,
+                    lastCompleted = plan.changes["last_completed"] ?: it.lastCompleted
+                )
+            )
+        }
         return runCatching {
             val remote = drive.downloadText(fileId)
-            drive.updateText(fileId, MarkdownPatcher.patch(remote, mapOf("status" to "done", "updated" to updated)))
+            drive.updateText(fileId, MarkdownPatcher.patch(remote, plan.changes))
             false
         }.getOrElse { error ->
             pendingDao.upsert(
@@ -159,7 +194,7 @@ class SyncEngine(
                     targetFolderId = null,
                     targetFolderName = null,
                     fileName = null,
-                    payload = updated,
+                    payload = json.encodeToString(TaskPatchPayload(plan.changes)),
                     createdEpochMs = System.currentTimeMillis(),
                     lastError = error.message
                 )
@@ -168,7 +203,30 @@ class SyncEngine(
         }
     }
 
+    /** Minimal stand-in for a note that is not in the local index; carries no recurrence hints. */
+    private fun unindexedTask(fileId: String) = LifeNote(
+        fileId = fileId,
+        name = "",
+        path = null,
+        type = NoteType.TASK,
+        status = "active",
+        title = "",
+        summary = null,
+        body = "",
+        created = null,
+        updated = null,
+        due = null,
+        project = null,
+        priority = null,
+        source = null,
+        processed = null,
+        tags = emptyList(),
+        modifiedTime = null,
+        md5Checksum = null
+    )
+
     suspend fun captureText(text: String): CaptureResult = captureRaw(text, "android-text", "Quick Capture")
+
     suspend fun captureVoice(text: String): CaptureResult = captureRaw(text, "android-voice", "Voice Inbox")
 
     private suspend fun captureRaw(text: String, source: String, folderName: String): CaptureResult {
@@ -304,7 +362,7 @@ class SyncEngine(
                     "PATCH_TASK_DONE" -> {
                         val fileId = requireNotNull(op.fileId)
                         val remote = drive.downloadText(fileId)
-                        drive.updateText(fileId, MarkdownPatcher.patch(remote, mapOf("status" to "done", "updated" to op.payload)))
+                        drive.updateText(fileId, MarkdownPatcher.patch(remote, decodePatchPayload(op.payload)))
                     }
                     else -> error("Unknown pending operation ${op.type}")
                 }
@@ -408,6 +466,24 @@ class SyncEngine(
     }
 
     private fun DriveFile.isMarkdown(): Boolean = mimeType == "text/markdown" || name.endsWith(".md", ignoreCase = true)
+
+    /** Frontmatter changes for a completed task, stored as the pending operation's payload. */
+    @Serializable
+    private data class TaskPatchPayload(val changes: Map<String, String>)
+
+    /**
+     * Reads a queued completion patch.
+     *
+     * Older builds stored the bare `updated` timestamp as the payload, so a plain string that is not
+     * a patch object is still honoured as legacy one-off completion. Without this, an update would
+     * fail to replay a completion queued before it — and `processPendingLocked` treats failure as
+     * "retry forever", so the entry would never drain.
+     */
+    private fun decodePatchPayload(payload: String): Map<String, String> {
+        val decoded = runCatching { json.decodeFromString<TaskPatchPayload>(payload) }.getOrNull()
+        if (decoded != null && decoded.changes.keys.any { it in PATCHABLE_KEYS }) return decoded.changes
+        return mapOf("status" to "done", "updated" to payload)
+    }
 
     private fun yamlScalar(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
 

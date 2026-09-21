@@ -273,6 +273,19 @@ private fun Shell(
             TopAppBar(
                 title = { },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                navigationIcon = {
+                    // Living inside the toolbar is what puts the status on the same horizontal line as
+                    // the settings action, and it is what keeps page content from shifting: the bar
+                    // reserves its height whether or not anything happens to be running.
+                    BusyChip(
+                        label = when {
+                            sync.isSyncing -> "正在同步……"
+                            captureInProgress -> "正在保存……"
+                            else -> null
+                        },
+                        reduceMotion = reduceMotion
+                    )
+                },
                 actions = {
                     IconButton(
                         onClick = onOpenSettings,
@@ -354,38 +367,40 @@ private fun Shell(
                     }
                 }
             }
+        }
+    }
+}
 
-            // Pinned to the top-start corner. A travelling indicator draws the eye to the motion
-            // rather than to the state, so this one only fades — it is either there or it is not.
-            // Sync and capture share one badge: one place to look for "something is happening".
-            val busyLabel = when {
-                sync.isSyncing -> "正在同步……"
-                captureInProgress -> "正在保存……"
-                else -> null
-            }
-            Box(Modifier.fillMaxSize().padding(top = 12.dp, start = 20.dp), contentAlignment = Alignment.TopStart) {
-                AnimatedVisibility(
-                    visible = busyLabel != null,
-                    enter = if (reduceMotion) EnterTransition.None
-                    else fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle)) +
-                        scaleIn(initialScale = 0.92f, animationSpec = Motion.arrive(reduceMotion)),
-                    exit = if (reduceMotion) ExitTransition.None
-                    else fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .softGlass(radius = 18.dp, emphasized = true, shadow = 6.dp)
-                            .padding(horizontal = 12.dp, vertical = 7.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Text(busyLabel.orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                        }
-                    }
-                }
+/**
+ * Status badge for work in flight, rendered in the toolbar's navigation slot.
+ *
+ * Sizing is intentionally constant across every state: only alpha and a small scale animate, so the
+ * toolbar measures the same whether the chip is visible or not and nothing below it ever shifts.
+ * A travelling indicator draws the eye to the motion rather than to the state, so this one only
+ * fades — it is either there or it is not.
+ */
+@Composable
+private fun BusyChip(label: String?, reduceMotion: Boolean) {
+    AnimatedVisibility(
+        visible = label != null,
+        enter = if (reduceMotion) EnterTransition.None
+        else fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle)) +
+            scaleIn(initialScale = 0.92f, animationSpec = Motion.arrive(reduceMotion)),
+        exit = if (reduceMotion) ExitTransition.None
+        else fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(start = 12.dp)
+                .softGlass(radius = 18.dp, emphasized = true, shadow = 6.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Text(label.orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1)
             }
         }
     }

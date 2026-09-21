@@ -32,9 +32,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.unit.dp
 import com.lifeos.secondbrain.domain.LifeNote
 import com.lifeos.secondbrain.domain.NoteType
+import com.lifeos.secondbrain.domain.TaskVisibility
 import com.lifeos.secondbrain.ui.AppViewModel
 import com.lifeos.secondbrain.ui.GlassSurface
 import com.lifeos.secondbrain.ui.formatWhen
+import java.time.LocalDate
 
 /**
  * Read-only expanded view of a single note. It deliberately shows the raw markdown body verbatim:
@@ -46,7 +48,12 @@ import com.lifeos.secondbrain.ui.formatWhen
 fun NoteDetailScreen(vm: AppViewModel, note: LifeNote, onBack: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val done = note.status.equals("done", ignoreCase = true)
+    val today = remember { LocalDate.now() }
+    val recurring = TaskVisibility.isRecurring(note)
+    // "Done" differs by kind: a one-off task carries status: done, a recurring one is done for today
+    // and becomes available again tomorrow. Showing one state for both would misreport one of them.
+    val doneToday = TaskVisibility.isCompletedOn(note, today)
+    val permanentlyDone = !recurring && note.status.equals("done", ignoreCase = true)
     val body = remember(note.fileId) { note.body.trim() }
     val blocks = remember(note.fileId) { parseMarkdownBlocks(body) }
     val properties = remember(note.fileId) { buildProperties(note) }
@@ -69,8 +76,16 @@ fun NoteDetailScreen(vm: AppViewModel, note: LifeNote, onBack: () -> Unit) {
                     Text(note.title, style = MaterialTheme.typography.headlineMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         AssistChip(onClick = {}, enabled = false, label = { Text(note.type.label()) })
-                        note.status?.takeIf { it.isNotBlank() }?.let { status ->
-                            AssistChip(onClick = {}, enabled = false, label = { Text(if (done) "已完成" else status) })
+                        when {
+                            recurring && doneToday ->
+                                AssistChip(onClick = {}, enabled = false, label = { Text("今天已完成") })
+                            recurring ->
+                                AssistChip(onClick = {}, enabled = false, label = { Text("每天") })
+                            permanentlyDone ->
+                                AssistChip(onClick = {}, enabled = false, label = { Text("已完成") })
+                            else -> note.status?.takeIf { it.isNotBlank() }?.let { status ->
+                                AssistChip(onClick = {}, enabled = false, label = { Text(status) })
+                            }
                         }
                         note.priority?.takeIf { it.isNotBlank() }?.let { priority ->
                             AssistChip(onClick = {}, enabled = false, label = { Text("优先级 $priority") })
@@ -139,11 +154,11 @@ fun NoteDetailScreen(vm: AppViewModel, note: LifeNote, onBack: () -> Unit) {
                 }
             }
 
-            if (note.type == NoteType.TASK && !done) {
+            if (note.type == NoteType.TASK && !permanentlyDone && !(recurring && doneToday)) {
                 item {
                     OutlinedButton(onClick = { vm.complete(note) }, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Rounded.CheckCircle, contentDescription = null)
-                        Text("  标记完成")
+                        Text(if (recurring) "  标记今天完成" else "  标记完成")
                     }
                 }
             }
@@ -182,6 +197,11 @@ fun NoteDetailScreen(vm: AppViewModel, note: LifeNote, onBack: () -> Unit) {
 private fun buildProperties(note: LifeNote): List<Pair<String, String>> = buildList {
     note.project?.takeIf { it.isNotBlank() }?.let { add("项目" to it) }
     note.due?.takeIf { it.isNotBlank() }?.let { add("截止" to it) }
+    if (TaskVisibility.isRecurring(note)) {
+        add("重复" to "每天")
+        note.start?.takeIf { it.isNotBlank() }?.let { add("开始" to it) }
+        add("上次完成" to (formatWhen(note.lastCompleted) ?: "还没有"))
+    }
     formatWhen(note.created)?.let { add("创建" to it) }
     formatWhen(note.updated)?.let { add("更新" to it) }
     note.source?.takeIf { it.isNotBlank() }?.let { add("来源" to if (it == "voice") "语音" else it) }

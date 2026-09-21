@@ -1,24 +1,17 @@
 package com.lifeos.secondbrain.ui
 
+import com.lifeos.secondbrain.domain.TimeParse
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * Vault frontmatter is hand-written, so date-ish fields arrive in several shapes: full ISO instants,
- * offset timestamps, local datetimes and bare dates. All of them mean "when did this happen", so they
- * share one tolerant parser instead of each screen re-deriving `Instant.parse` fallbacks.
+ * Tolerant frontmatter time parsing now lives in [TimeParse] under `domain`, because task visibility
+ * rules depend on it and domain logic must not reach forwards into the UI layer. Kept as a thin
+ * alias so existing call sites do not churn.
  */
-fun parseFlexibleTime(raw: String?): Instant? {
-    if (raw.isNullOrBlank()) return null
-    return runCatching { Instant.parse(raw) }.getOrNull()
-        ?: runCatching { OffsetDateTime.parse(raw).toInstant() }.getOrNull()
-        ?: runCatching { LocalDateTime.parse(raw).atZone(ZoneId.systemDefault()).toInstant() }.getOrNull()
-        ?: runCatching { LocalDate.parse(raw).atStartOfDay(ZoneId.systemDefault()).toInstant() }.getOrNull()
-}
+fun parseFlexibleTime(raw: String?): Instant? = TimeParse.instant(raw)
 
 private val friendlyDate: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 private val friendlyDateTime: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
@@ -28,7 +21,7 @@ private val friendlyDateTime: DateTimeFormatter = DateTimeFormatter.ofPattern("y
  * recent, because "3 天前" is what a person actually wants to know about their own note.
  */
 fun formatWhen(raw: String?): String? {
-    val instant = parseFlexibleTime(raw) ?: return raw?.takeIf { it.isNotBlank() }
+    val instant = TimeParse.instant(raw) ?: return raw?.takeIf { it.isNotBlank() }
     val zone = ZoneId.systemDefault()
     val moment = instant.atZone(zone)
     val today = LocalDate.now(zone)

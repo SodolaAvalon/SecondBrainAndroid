@@ -24,13 +24,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lifeos.secondbrain.domain.LifeNote
 import com.lifeos.secondbrain.domain.NoteType
+import com.lifeos.secondbrain.domain.TimeParse
 import com.lifeos.secondbrain.ui.AppViewModel
 import com.lifeos.secondbrain.ui.GlassSurface
 import com.lifeos.secondbrain.ui.sectionEnter
 import java.time.Instant
 import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
 import java.time.ZoneId
 
 enum class ArchiveTypeFilter { ALL, TASK, IDEA, RAW, JOURNAL, PROJECT, REFERENCE }
@@ -143,13 +142,7 @@ private fun matchesDate(note: LifeNote, filter: ArchiveDateFilter): Boolean {
     }
 }
 
-private fun parseTime(raw: String?): Instant? {
-    if (raw.isNullOrBlank()) return null
-    return runCatching { Instant.parse(raw) }.getOrNull()
-        ?: runCatching { OffsetDateTime.parse(raw).toInstant() }.getOrNull()
-        ?: runCatching { LocalDateTime.parse(raw).atZone(ZoneId.systemDefault()).toInstant() }.getOrNull()
-        ?: runCatching { LocalDate.parse(raw).atStartOfDay(ZoneId.systemDefault()).toInstant() }.getOrNull()
-}
+private fun parseTime(raw: String?): Instant? = TimeParse.instant(raw)
 
 private fun ArchiveTypeFilter.label(): String = when (this) {
     ArchiveTypeFilter.ALL -> "全部"

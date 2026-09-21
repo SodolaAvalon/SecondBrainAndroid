@@ -1,5 +1,6 @@
 package com.lifeos.secondbrain.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Fts4
 import androidx.room.FtsOptions
@@ -24,7 +25,19 @@ data class NoteEntity(
     val processed: Boolean?,
     val tagsEncoded: String,
     val modifiedTime: String?,
-    val md5Checksum: String?
+    val md5Checksum: String?,
+    /** Recurring tasks: date the series becomes available. Added in schema v4. */
+    val start: String? = null,
+    /** Recurring tasks: cadence. Named `repeatCadence` because `repeat` is a Kotlin keyword. */
+    @ColumnInfo(name = "repeat") val repeatCadence: String? = null,
+    /**
+     * Recurring tasks: date of the most recent completion. Added in schema v4.
+     *
+     * Pinned to the snake_case frontmatter key on purpose. Kotlin would default the column name to
+     * `lastCompleted`, which would then disagree with both the frontmatter key and the migration SQL,
+     * and Room validates the migrated schema against the entity — a mismatch fails at open time.
+     */
+    @ColumnInfo(name = "last_completed") val lastCompleted: String? = null
 )
 
 /**

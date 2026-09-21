@@ -23,6 +23,7 @@
 - OpenAI-Compatible `AiProvider`：Base URL / Model / API Key 配置、结构化 JSON 验证、AI 生成 Markdown、Raw Capture 保留不覆盖。
 - API Key 使用 Android Keystore 加密，不写入 DataStore、Git 或日志。
 - 任务分段：今天 / 近期 / 全部 / 完成；灵感分段：想法 / 计划 / 创作 / 学习。
+- **周期任务**：`repeat: daily` 配合 `start` / `last_completed`。同一个 Markdown 文件按日期动态出现在"今天"——完成后当天隐藏，次日自动回归；**永不写成 `status: done`**，也不进"完成"列表（避免每个习惯每天各刷一条）。
 - 档案页支持本地全文搜索、类型和日期过滤。
 - 高级视觉基础层：浅/深模式、克制半透明玻璃材质、Spring 按压反馈、减少动态效果开关。
 - 笔记详情页：四个页签的卡片均可点开，显示完整正文（常见 Markdown 结构会渲染为标题 / 复选框 / 列表 / 引用 / 代码块）、全部属性与标签，支持标记完成与在 Drive 中打开原文。详情页只读，不修改 Vault。

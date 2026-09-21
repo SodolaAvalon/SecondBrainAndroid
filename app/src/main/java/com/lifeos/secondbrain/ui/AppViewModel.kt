@@ -7,6 +7,7 @@ import com.lifeos.secondbrain.AppContainer
 import com.lifeos.secondbrain.ai.OpenAiCompatibleProvider
 import com.lifeos.secondbrain.domain.LifeNote
 import com.lifeos.secondbrain.domain.SyncState
+import com.lifeos.secondbrain.domain.TaskVisibility
 import com.lifeos.secondbrain.security.SecureSecretStore
 import com.lifeos.secondbrain.settings.AppearanceMode
 import com.lifeos.secondbrain.settings.SettingsSnapshot
@@ -75,14 +76,23 @@ class AppViewModel(private val c: AppContainer) : ViewModel() {
 
     fun complete(note: LifeNote) {
         viewModelScope.launch {
+            val recurring = TaskVisibility.isRecurring(note)
             val queued = runCatching { c.sync.completeTask(note.fileId) }.getOrElse {
                 message.value = "这条任务暂时还没同步，稍后会自动重试。"
                 return@launch
             }
             if (queued) {
                 c.syncScheduler.enqueuePendingSync()
-                message.value = "已完成，联网后会同步到 Drive。"
+                message.value = if (recurring) {
+                    "今天已完成，联网后会同步到 Drive。"
+                } else {
+                    "已完成，联网后会同步到 Drive。"
+                }
+                return@launch
             }
+            // Recurring tasks deliberately never become permanently done, so the wording must not
+            // imply they are about to disappear into a completed list.
+            message.value = if (recurring) "今天这项完成了，明天会再出现。" else "已完成。"
         }
     }
 

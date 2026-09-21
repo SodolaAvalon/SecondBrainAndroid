@@ -27,7 +27,13 @@ data class LifeNote(
     val processed: Boolean?,
     val tags: List<String>,
     val modifiedTime: String?,
-    val md5Checksum: String?
+    val md5Checksum: String?,
+    /** Recurring tasks: date the series becomes available. */
+    val start: String? = null,
+    /** Recurring tasks: cadence; currently only `daily` is understood. */
+    val repeat: String? = null,
+    /** Recurring tasks: date of the most recent completion. Drives daily re-appearance. */
+    val lastCompleted: String? = null
 )
 
 data class SyncState(

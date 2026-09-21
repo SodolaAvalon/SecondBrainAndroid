@@ -5,7 +5,8 @@ import com.lifeos.secondbrain.domain.NoteType
 
 fun LifeNote.toEntity() = NoteEntity(
     fileId, name, path, type.raw, status, title, summary, body, created, updated, due,
-    project, priority, source, processed, tags.joinToString("\u001F"), modifiedTime, md5Checksum
+    project, priority, source, processed, tags.joinToString("\u001F"), modifiedTime, md5Checksum,
+    start, repeat, lastCompleted
 )
 
 fun NoteEntity.toDomain() = LifeNote(
@@ -26,5 +27,8 @@ fun NoteEntity.toDomain() = LifeNote(
     processed = processed,
     tags = tagsEncoded.split("\u001F").filter { it.isNotBlank() },
     modifiedTime = modifiedTime,
-    md5Checksum = md5Checksum
+    md5Checksum = md5Checksum,
+    start = start,
+    repeat = repeatCadence,
+    lastCompleted = lastCompleted
 )

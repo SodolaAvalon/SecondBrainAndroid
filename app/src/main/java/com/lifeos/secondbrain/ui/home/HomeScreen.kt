@@ -16,40 +16,47 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lifeos.secondbrain.domain.LifeNote
+import com.lifeos.secondbrain.domain.TaskVisibility
+import com.lifeos.secondbrain.domain.TimeParse
 import com.lifeos.secondbrain.ui.AppViewModel
 import com.lifeos.secondbrain.ui.GlassSurface
-import com.lifeos.secondbrain.ui.parseFlexibleTime
 import com.lifeos.secondbrain.ui.sectionEnter
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 
 @Composable
 fun HomeScreen(vm: AppViewModel, onAuthorizeDrive: () -> Unit, onOpenNote: (LifeNote) -> Unit) {
-    val tasks by vm.tasks.collectAsStateWithLifecycle()
+    val activeTasks by vm.tasks.collectAsStateWithLifecycle()
     val ideas by vm.ideas.collectAsStateWithLifecycle()
     val projects by vm.projects.collectAsStateWithLifecycle()
     val rawNotes by vm.rawNotes.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val sync by vm.sync.collectAsStateWithLifecycle()
-    val forgotten = (tasks + projects)
+    val today = remember { LocalDate.now() }
+    // Shared visibility rule — the same one TasksScreen uses, so the two screens cannot disagree
+    // about what "today" means.
+    val todayTasks = activeTasks.filter { TaskVisibility.isTodayTask(it, today) }
+    val doneToday = activeTasks.count { TaskVisibility.isRecurring(it) && TaskVisibility.isCompletedOn(it, today) }
+    val forgotten = (activeTasks + projects)
         .filter { !it.status.equals("done", true) }
+        .filterNot { TaskVisibility.isRecurring(it) }
         .filter(::isForgotten)
         .distinctBy { it.fileId }
         .take(3)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        // Top padding clears the pinned status chip in AppRoot. Reserved unconditionally so the
-        // greeting does not jump down when a sync happens to be running.
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             start = 20.dp,
             end = 20.dp,
-            top = 44.dp,
+            top = 8.dp,
             bottom = 8.dp
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -86,7 +93,7 @@ fun HomeScreen(vm: AppViewModel, onAuthorizeDrive: () -> Unit, onOpenNote: (Life
             }
         } else {
             item {
-                val focus = tasks.firstOrNull()
+                val focus = todayTasks.firstOrNull()
                 GlassSurface(
                     modifier = Modifier.fillMaxWidth(),
                     radius = 30.dp,
@@ -96,13 +103,20 @@ fun HomeScreen(vm: AppViewModel, onAuthorizeDrive: () -> Unit, onOpenNote: (Life
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("现在先做这个", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                         if (focus == null) {
-                            Text("今天没有非做不可的事。", style = MaterialTheme.typography.headlineSmall)
-                            Text("可以放心做点别的。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                if (doneToday > 0) "今天的都做完了。" else "今天没有非做不可的事。",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
+                            Text(
+                                if (doneToday > 0) "今天完成了 $doneToday 项周期任务，明天它们会再回来。" else "可以放心做点别的。",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         } else {
                             Text(focus.title, style = MaterialTheme.typography.headlineSmall)
                             val meta = listOfNotNull(
                                 focus.due?.let { "截止 $it" },
-                                focus.project?.let { "来自 $it" }
+                                focus.project?.let { "来自 $it" },
+                                if (TaskVisibility.isRecurring(focus)) "每天" else null
                             ).joinToString(" · ")
                             if (meta.isNotBlank()) Text(meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -114,11 +128,20 @@ fun HomeScreen(vm: AppViewModel, onAuthorizeDrive: () -> Unit, onOpenNote: (Life
             }
 
             item { SectionHeading("今天") }
-            if (tasks.isEmpty()) {
-                item { QuietEmpty("这里暂时很安静。") }
+            if (todayTasks.isEmpty()) {
+                item {
+                    QuietEmpty(
+                        if (doneToday > 0) "今天的任务已经完成，明天它们会再出现。"
+                        else "这里暂时很安静。"
+                    )
+                }
             }
-            itemsIndexed(tasks.take(5), key = { _, n -> "today-${n.fileId}" }) { index, note ->
-                NoteCard(note, settings.reduceMotion, Modifier.sectionEnter(note.fileId, index, settings.reduceMotion)) {
+            itemsIndexed(todayTasks.take(5), key = { _, n -> "today-${n.fileId}" }) { index, note ->
+                NoteCard(
+                    note = note,
+                    reduceMotion = settings.reduceMotion,
+                    modifier = Modifier.sectionEnter(note.fileId, index, settings.reduceMotion)
+                ) {
                     onOpenNote(note)
                 }
             }
@@ -263,6 +286,6 @@ private fun greeting(): String = when (LocalTime.now().hour) {
 }
 
 private fun isForgotten(note: LifeNote): Boolean {
-    val instant = parseFlexibleTime(note.updated ?: note.modifiedTime ?: note.created) ?: return false
+    val instant = TimeParse.instant(note.updated ?: note.modifiedTime ?: note.created) ?: return false
     return Duration.between(instant, Instant.now()).toDays() >= 30
 }
