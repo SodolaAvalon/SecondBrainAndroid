@@ -251,11 +251,15 @@ private fun Shell(
                         // Same line as the settings action, and the bar keeps its height whether or not
                         // anything is running, so page content never shifts.
                         //
-                        // Only saving uses this chip. Syncing is represented by the centred spinner, so
-                        // showing "正在同步……" here as well would restore the duplicated status that
-                        // moving it to the centre was meant to remove.
+                        // Sync shows both this label and the centred spinner by explicit request: the
+                        // words say what is happening, the spinner says it is still happening. Capture
+                        // has no spinner anywhere, so its label stands alone.
                         BusyChip(
-                            label = if (captureInProgress) "正在保存……" else null,
+                            label = when {
+                                sync.isSyncing -> "正在同步……"
+                                captureInProgress -> "正在保存……"
+                                else -> null
+                            },
                             reduceMotion = reduceMotion
                         )
                     },
