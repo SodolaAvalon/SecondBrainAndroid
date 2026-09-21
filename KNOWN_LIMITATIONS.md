@@ -28,10 +28,13 @@
 - **独立性最终验证**：现有内置内核测试均在 FlClash 系统 VPN 开启状态下完成，尚需关闭 FlClash VPN 后复测，才能确认完全不依赖系统 VPN。
 - Credential Manager 的**取消授权、token 失效与重连**异常路径。
 - SpeechRecognizer 语音 Capture 的真机麦克风与语音服务验证。
-- 数据库**迁移策略**：当前 `fallbackToDestructiveMigration` 会连待同步队列一起清空，版本升级 + 改 schema 时可能丢失未写回 Drive 的唯一副本。
+- **数据库迁移策略**：当前 `fallbackToDestructiveMigration` 会连待同步队列一起清空，版本升级 + 改 schema 时可能丢失未写回 Drive 的唯一副本。
+- **写回无 If-Match / ETag**：多端同时编辑时会静默覆盖。
 - 液态玻璃当前使用轻量材质实现；真正的实时 backdrop 折射还没有作为默认能力接入。
 - 生物识别 App Lock 尚未实现。
 - AI 自动整理的网络失败目前保证 Raw 原文安全，但还需要增加独立“稍后重新整理”的长期任务队列 / 手动重试入口，才能把 AI 重试体验做完整。
+- **旋转屏幕会丢失当前页签**：`AppRoot` 的 `tab` / `settingsOpen` / `openNote` 用 `remember` 而非 `rememberSaveable`，旋转后回到主页；同时 `initialize()` 在 `onCreate` 中调用会触发重复同步。
+- **档案页搜索无防抖**：逐字符触发 FTS 查询。
 
 ## Frontmatter 范围
 
