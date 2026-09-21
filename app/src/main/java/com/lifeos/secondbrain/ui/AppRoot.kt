@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
@@ -14,11 +15,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -44,6 +45,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lifeos.secondbrain.domain.LifeNote
@@ -78,6 +82,9 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
     var capture by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var openNote by remember { mutableStateOf<LifeNote?>(null) }
+    // Whether the current surface change moves deeper (shell -> secondary) or back out of it.
+    // The transition reads this so going back reverses the motion instead of replaying the forward one.
+    var navForward by remember { mutableStateOf(true) }
     val snack = remember { SnackbarHostState() }
     val message by vm.message.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
@@ -99,6 +106,7 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
     // The capture sheet installs its own handler as a ModalBottomSheet, so it is not handled here.
     // Enabled only for overlay surfaces, so back on the shell still exits the app as users expect.
     BackHandler(enabled = surface != Surface.SHELL) {
+        navForward = false
         when (surface) {
             Surface.DETAIL -> openNote = null
             Surface.SETTINGS -> settingsOpen = false
@@ -108,7 +116,7 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
 
     AnimatedContent(
         targetState = surface,
-        transitionSpec = { overlayTransition(reduceMotion) },
+        transitionSpec = { overlayTransition(reduceMotion, forward = navForward) },
         label = "surface"
     ) { current ->
         when (current) {
@@ -122,7 +130,10 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                         snackbarHost = { SnackbarHost(snack) }
                     ) { padding ->
                         Box(Modifier.fillMaxSize().padding(padding)) {
-                            NoteDetailScreen(vm, note, onBack = { openNote = null })
+                            NoteDetailScreen(vm, note, onBack = {
+                                navForward = false
+                                openNote = null
+                            })
                         }
                     }
                 }
@@ -133,7 +144,10 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                 snackbarHost = { SnackbarHost(snack) }
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)) {
-                    SettingsScreen(vm, onBack = { settingsOpen = false })
+                    SettingsScreen(vm, onBack = {
+                        navForward = false
+                        settingsOpen = false
+                    })
                 }
             }
 
@@ -146,8 +160,14 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
                 sync = sync,
                 captureInProgress = captureInProgress,
                 onAuthorizeDrive = onAuthorizeDrive,
-                onOpenSettings = { settingsOpen = true },
-                onOpenNote = { openNote = it },
+                onOpenSettings = {
+                    navForward = true
+                    settingsOpen = true
+                },
+                onOpenNote = {
+                    navForward = true
+                    openNote = it
+                },
                 onCapture = { capture = true }
             )
         }
@@ -157,25 +177,79 @@ fun AppRoot(vm: AppViewModel, onAuthorizeDrive: () -> Unit) {
 }
 
 /**
- * Overlay surfaces slide in from the trailing edge and settle; the shell eases back slightly and
- * fades. The shell deliberately does not slide fully off — a short parallax reads as depth instead
- * of as two unrelated screens swapping places.
+ * Depth navigation must reverse when the user goes back, otherwise returning *out* of a screen
+ * replays the motion of entering it — the surface is pushed further in the direction it should be
+ * leaving, which reads as the app fighting the user.
+ *
+ * Forward: the overlay arrives from the trailing edge, the shell parallaxes back and dims.
+ * Return: exactly mirrored — the overlay retreats to the trailing edge, the shell eases home.
+ * The shell never slides fully off; a short parallax reads as depth rather than as two unrelated
+ * screens swapping places.
+ *
+ * `internal` rather than private so the direction contract is covered by unit tests; the motion
+ * itself cannot be asserted from a screenshot because a capture costs far longer than the animation.
  */
-private fun overlayTransition(reduceMotion: Boolean): androidx.compose.animation.ContentTransform {
+internal fun overlayTransition(
+    reduceMotion: Boolean,
+    forward: Boolean
+): androidx.compose.animation.ContentTransform {
     if (reduceMotion) return EnterTransition.None togetherWith ExitTransition.None
-    val enter = slideInHorizontally(
-        animationSpec = Motion.page(reduceMotion),
-        initialOffsetX = { width -> width }
-    ) + fadeIn(tween(Motion.PAGE_MS, easing = Motion.Settle))
-    val exit = slideOutHorizontally(
-        animationSpec = Motion.page(reduceMotion),
-        targetOffsetX = { width -> width }
-    ) + fadeOut(tween(Motion.PAGE_MS, easing = Motion.Settle))
-    val shellOut = slideOutHorizontally(
-        animationSpec = Motion.page(reduceMotion),
-        targetOffsetX = { width -> -width / 5 }
-    ) + fadeOut(tween(Motion.PAGE_MS / 2, easing = Motion.Settle))
-    return enter togetherWith shellOut
+
+    // Note the deliberate mismatch: this Compose version types the spec as FiniteAnimationSpec<IntOffset>
+    // while the offset lambda is Function1<Int, Int> (container width in, pixel offset out).
+    val pageSpec: FiniteAnimationSpec<IntOffset> =
+        if (reduceMotion) snap() else tween(Motion.PAGE_MS, easing = Motion.Emphasized)
+    val fadeSpec = tween<Float>(Motion.PAGE_MS, easing = Motion.Settle)
+    val parallaxFadeSpec = tween<Float>(Motion.PAGE_MS / 2, easing = Motion.Settle)
+
+    // Direction lives in DepthMotion so it stays unit-testable; here it is only turned into pixels.
+    // Signs are resolved against the measured width, and IntOffset is only ever built inside those
+    // lambdas, which is why the spec above talks about IntOffset while the maths is done in Int.
+    val depth = DepthMotion.of(forward)
+
+    return if (forward) {
+        val overlayIn = slideInHorizontally(pageSpec) { (it * depth.overlayFrom).toInt() } + fadeIn(fadeSpec)
+        val shellBack = slideOutHorizontally(pageSpec) { (it * depth.shellFrom).toInt() } + fadeOut(parallaxFadeSpec)
+        overlayIn togetherWith shellBack
+    } else {
+        val overlayOut = slideOutHorizontally(pageSpec) { (it * depth.overlayFrom).toInt() } + fadeOut(fadeSpec)
+        val shellHome = slideInHorizontally(pageSpec) { (it * depth.shellFrom).toInt() } + fadeIn(fadeSpec)
+        shellHome togetherWith overlayOut
+    }
+}
+
+/**
+ * Pull-to-refresh answer, pinned to the top-start corner.
+ *
+ * The stock indicator rides down from the top-centre as the list is dragged, which is the motion
+ * that reads as wrong here. This one only fades in place, following the drag distance so the
+ * gesture still feels answered, and it disappears the moment the drag is released — ongoing status
+ * is the corner chip's job, not this one's.
+ *
+ * Written against [PullToRefreshState.distanceFraction] rather than the defaults' Indicator, whose
+ * parameters are not part of a stable contract across Compose versions.
+ */
+@Composable
+private fun BoxScope.CornerPullIndicator(
+    state: PullToRefreshState,
+    isRefreshing: Boolean
+) {
+    val drag = state.distanceFraction.coerceIn(0f, 1f)
+    val visible = isRefreshing || drag > 0f
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(120)),
+        exit = fadeOut(tween(160)),
+        modifier = Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 12.dp)
+    ) {
+        CircularProgressIndicator(
+            progress = { if (isRefreshing) 1f else drag },
+            modifier = Modifier
+                .size(18.dp)
+                .graphicsLayer { alpha = 0.45f },
+            strokeWidth = 2.dp
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -238,9 +312,15 @@ private fun Shell(
         }
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
+            val pullState = rememberPullToRefreshState()
             PullToRefreshBox(
                 isRefreshing = sync.isSyncing,
                 onRefresh = { vm.refresh() },
+                state = pullState,
+                // The stock indicator rides down from the top-centre as you pull, which is the
+                // motion that reads as wrong here. Scaled down and blended out it still answers the
+                // drag, while the corner chip below carries the actual status.
+                indicator = { CornerPullIndicator(state = pullState, isRefreshing = sync.isSyncing) },
                 modifier = Modifier.fillMaxSize()
             ) {
                 // Tab switches slide a short distance in the direction of travel, so moving between
@@ -275,28 +355,35 @@ private fun Shell(
                 }
             }
 
-            AnimatedVisibility(
-                visible = captureInProgress,
-                enter = if (reduceMotion) EnterTransition.None
-                else slideInVertically(tween(Motion.ENTER_MS, easing = Motion.Settle)) { it / 2 } +
-                    fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle)) +
-                    scaleIn(initialScale = 0.94f, animationSpec = Motion.arrive(reduceMotion)),
-                exit = if (reduceMotion) ExitTransition.None
-                else fadeOut(tween(140)) + scaleOut(targetScale = 0.96f, animationSpec = tween(140)),
-                modifier = Modifier.align(Alignment.BottomCenter)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .padding(bottom = 96.dp)
-                        .softGlass(radius = 22.dp, emphasized = true, shadow = 10.dp)
-                        .padding(horizontal = 18.dp, vertical = 12.dp)
+            // Pinned to the top-start corner. A travelling indicator draws the eye to the motion
+            // rather than to the state, so this one only fades — it is either there or it is not.
+            // Sync and capture share one badge: one place to look for "something is happening".
+            val busyLabel = when {
+                sync.isSyncing -> "正在同步……"
+                captureInProgress -> "正在保存……"
+                else -> null
+            }
+            Box(Modifier.fillMaxSize().padding(top = 12.dp, start = 20.dp), contentAlignment = Alignment.TopStart) {
+                AnimatedVisibility(
+                    visible = busyLabel != null,
+                    enter = if (reduceMotion) EnterTransition.None
+                    else fadeIn(tween(Motion.ENTER_MS, easing = Motion.Settle)) +
+                        scaleIn(initialScale = 0.92f, animationSpec = Motion.arrive(reduceMotion)),
+                    exit = if (reduceMotion) ExitTransition.None
+                    else fadeOut(tween(140)) + scaleOut(targetScale = 0.94f, animationSpec = tween(140))
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    Box(
+                        modifier = Modifier
+                            .softGlass(radius = 18.dp, emphasized = true, shadow = 6.dp)
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
                     ) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text("正在保存……", style = MaterialTheme.typography.bodyMedium)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Text(busyLabel.orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                        }
                     }
                 }
             }

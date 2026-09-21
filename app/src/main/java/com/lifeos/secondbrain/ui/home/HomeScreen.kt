@@ -44,19 +44,23 @@ fun HomeScreen(vm: AppViewModel, onAuthorizeDrive: () -> Unit, onOpenNote: (Life
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+        // Top padding clears the pinned status chip in AppRoot. Reserved unconditionally so the
+        // greeting does not jump down when a sync happens to be running.
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            start = 20.dp,
+            end = 20.dp,
+            top = 44.dp,
+            bottom = 8.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
             Text(greeting(), style = MaterialTheme.typography.headlineLarge)
-            when {
-                sync.isSyncing -> Text(
-                    sync.message.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                sync.error != null -> Text(
-                    sync.error.orEmpty(),
+            // Progress text now lives in the pinned corner chip; only failures stay inline, where
+            // they cannot be mistaken for routine activity that will pass on its own.
+            sync.error?.takeIf { !sync.isSyncing }?.let {
+                Text(
+                    it,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

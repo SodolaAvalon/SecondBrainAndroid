@@ -19,6 +19,34 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
 
 /**
+ * Signed travel distances for a depth change, in fractions of the container width.
+ *
+ * Kept as plain numbers, separate from the Compose transitions that consume them, because
+ * `EnterTransition` exposes only its target alpha — the direction it travels is not observable from
+ * the outside, so this is the part that can actually be asserted in a test.
+ *
+ * @param overlayFrom signed offset the overlay travels to/from: `+1` when it arrives from the
+ *   trailing edge, `-1` when it retreats back to it. The sign flips on return, which is the whole
+ *   point — leaving a screen must not replay entering it.
+ * @param shellFrom signed offset the shell sits at while an overlay covers it. Constant in both
+ *   directions: the shell is displaced once and restored, never sent further away.
+ */
+internal data class DepthMotion(
+    val overlayFrom: Float,
+    val shellFrom: Float
+) {
+    companion object {
+        /** Shallow on purpose, and always towards the leading edge: depth, not a second page. */
+        const val SHELL_PARALLAX = -0.2f
+
+        fun of(forward: Boolean): DepthMotion = DepthMotion(
+            overlayFrom = if (forward) 1f else -1f,
+            shellFrom = SHELL_PARALLAX
+        )
+    }
+}
+
+/**
  * Shared motion vocabulary.
  *
  * Every helper takes `reduceMotion` from the app's settings and degrades to `snap()`, because an
@@ -38,11 +66,6 @@ object Motion {
     /** Crisp and controlled — used for content that moves a short distance. */
     fun <T> settle(reduceMotion: Boolean, durationMs: Int = ENTER_MS): FiniteAnimationSpec<T> =
         if (reduceMotion) snap() else tween(durationMs, easing = Settle)
-
-    /** Softer settle for full-screen surfaces that travel a longer distance. */
-    fun page(reduceMotion: Boolean): FiniteAnimationSpec<androidx.compose.ui.unit.IntOffset> =
-        if (reduceMotion) snap()
-        else tween(PAGE_MS, easing = Emphasized)
 
     fun pageAlpha(reduceMotion: Boolean): AnimationSpec<Float> =
         if (reduceMotion) snap() else tween(PAGE_MS, easing = Settle)
