@@ -13,7 +13,9 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -110,12 +112,10 @@ fun GlassSurface(
     content: @Composable BoxScope.() -> Unit
 ) {
     val clickable = onClick != null
-    // A quiet chevron is the only affordance that tells the user a card opens further.
-    val chevronSpace = if (clickable) 14.dp else 0.dp
     val horizontal = contentPadding.calculateLeftPadding(LayoutDirection.Ltr)
     val vertical = contentPadding.calculateTopPadding()
 
-    Box(
+    Row(
         modifier = modifier
             .softGlass(radius = radius, emphasized = emphasized)
             .clip(RoundedCornerShape(radius))
@@ -126,24 +126,38 @@ fun GlassSurface(
                     Modifier
                 }
             )
-            .padding(
-                start = horizontal,
-                top = vertical,
-                end = horizontal + chevronSpace,
-                bottom = vertical
-            )
+            .padding(horizontal = horizontal, vertical = vertical),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(modifier = Modifier.align(Alignment.CenterStart), content = content)
+        // weight(1f) is what keeps text out of the chevron: it shrinks the content to the width
+        // actually left over. Previously the content box was measured against the whole card and the
+        // chevron was merely drawn on top of it, so long lines ran underneath the arrow.
+        Box(
+            modifier = Modifier.weight(1f),
+            content = content
+        )
         if (clickable) {
-            Icon(
-                imageVector = Icons.Rounded.ChevronRight,
-                contentDescription = onClickLabel,
-                modifier = Modifier.align(Alignment.CenterEnd),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-            )
+            // A fixed trailing slot, not padding: the arrow's real width always stays reserved
+            // whether or not a given row happens to be long.
+            Box(
+                modifier = Modifier
+                    .padding(start = 10.dp)
+                    .size(CHEVRON_SLOT),
+                contentAlignment = Alignment.Center
+            ) {
+                // A quiet chevron is the only affordance that tells the user a card opens further.
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = onClickLabel,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                )
+            }
         }
     }
 }
+
+/** Matches the default 24.dp icon size so the reserved slot can never be narrower than the glyph. */
+private val CHEVRON_SLOT = 24.dp
 
 private fun Color.luminanceCompat(): Float {
     fun channel(value: Float): Float = if (value <= 0.03928f) value / 12.92f else
