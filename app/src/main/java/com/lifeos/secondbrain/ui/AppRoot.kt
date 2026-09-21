@@ -218,40 +218,6 @@ internal fun overlayTransition(
     }
 }
 
-/**
- * Gesture feedback for the pull-to-refresh drag, and *only* that.
- *
- * It deliberately takes no `isRefreshing` input. PullToRefreshBox is driven by `sync.isSyncing`,
- * which is also true for background syncs the user never initiated — so letting this component read
- * the refreshing flag made it appear for every sync, duplicating the toolbar status chip and leaving
- * a stray circle above the greeting. Ongoing sync state belongs to the chip alone; this one exists
- * purely to answer a finger that is currently on the screen.
- *
- * Gating on `drag > 0f` alone is enough: `distanceFraction` animates back to zero on release, so the
- * indicator retires on its own without ever latching on to the sync that follows.
- */
-@Composable
-private fun BoxScope.CornerPullIndicator(
-    state: PullToRefreshState,
-    reduceMotion: Boolean
-) {
-    val drag = state.distanceFraction.coerceIn(0f, 1f)
-    AnimatedVisibility(
-        visible = drag > 0f,
-        enter = if (reduceMotion) EnterTransition.None else fadeIn(tween<Float>(120)),
-        exit = if (reduceMotion) ExitTransition.None else fadeOut(tween<Float>(160)),
-        modifier = Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 12.dp)
-    ) {
-        CircularProgressIndicator(
-            progress = { drag },
-            modifier = Modifier
-                .size(18.dp)
-                .graphicsLayer { alpha = 0.45f },
-            strokeWidth = 2.dp
-        )
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Shell(
@@ -330,8 +296,16 @@ private fun Shell(
                 isRefreshing = sync.isSyncing,
                 onRefresh = { vm.refresh() },
                 state = pullState,
-                // Gesture feedback only. Sync status lives in the toolbar chip; see CornerPullIndicator.
-                indicator = { CornerPullIndicator(state = pullState, reduceMotion = reduceMotion) },
+                // Draws nothing, on purpose. The content area must never show a circular spinner:
+                // `isRefreshing` is keyed off `sync.isSyncing`, which is also true for background
+                // syncs the user never started, so any indicator here duplicates the toolbar chip.
+                // Re-gating its visibility was not enough — a circle still appeared mid-pull — so the
+                // component is gone rather than hidden. The pull gesture itself still works; only the
+                // drawing is suppressed.
+                //
+                // Accepted trade-off: a pull that never reaches the threshold now gives no on-screen
+                // feedback. Sync status is the toolbar chip's job alone.
+                indicator = {},
                 modifier = Modifier.fillMaxSize()
             ) {
                 // Tab switches slide a short distance in the direction of travel, so moving between
